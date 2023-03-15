@@ -1,0 +1,203 @@
+---
+title: "import"
+output: html_notebook
+---
+
+
+```{r setup}
+pacman::p_load(googlesheets4,
+               tidyverse,
+               ggalluvial)
+
+gs4_auth()
+```
+
+```{r}
+library(readxl)
+Elenco_comuni_italiani <- read_excel("Elenco-comuni-italiani.xls", 
+    col_types = c("skip", "skip", "skip", 
+        "skip", "skip", "skip", "text", "skip", 
+        "skip", "text", "text", "text", 
+        "skip", "skip", "text", "skip", 
+        "skip", "skip", "skip", "skip", 
+        "skip", "skip", "skip", "skip", "skip", 
+        "skip")) %>%
+  rename(Location = `Denominazione in italiano`,
+         Macro_Territory = `Ripartizione geografica`,
+         Territory = `Denominazione Regione`,
+         Province = `Provincia`,
+         Sigla = `Sigla automobilistica`
+         )
+```
+
+```{r}
+"hello how
+are you" %>% word(1)
+```
+
+
+
+```{r}
+read_sheet("https://docs.google.com/spreadsheets/d/1TPGpDsi9NqAmwQ1qGfF24zoH6quFQkzlOJFMChFbXQs/edit?resourcekey#gid=2038016536") %>%
+  rename(Age = `Età (in anni compiuti)`,
+         Gender = Genere,
+         Job = `Qual è il tuo lavoro o condizione rispetto al mercato del lavoro?`,
+         Location = `In quale Comune vivi?`,
+         Vote_2022 = `Quale partito hai votato alle elezioni Politiche nazionali del 25 Settembre 2022? (solo nel caso di voto disgiunto: indica i DUE partiti)`,
+         Vote_2018 = `Quale partito hai votato alle elezioni Politiche nazionali del 2018? (solo nel caso di voto disgiunto: indica i DUE partiti)`,
+         Self_Identity = `Con quale di queste definizioni ti identifichi?`) -> db_risposte
+
+db_risposte %>%
+  left_join(Elenco_comuni_italiani, by = "Location") %>%
+  relocate(Territory,Macro_Territory,
+           .after = "Location") %>%
+  mutate(
+    Siciliani =
+    case_when(Territory == "Sicilia" ~
+               TRUE,
+              TRUE ~
+               FALSE)
+    ) %>%
+  mutate(
+  Pol_allocation_2022 =
+           case_when(
+             Vote_2022 %>% str_detect(
+               "Fratelli|Forza|Lega|Moderati|Sgarbi|Italex") ~
+               "Conservatives",
+             Vote_2022 %>% str_detect("Azione") ~
+               "Libertarians",
+             Vote_2022 %>% str_detect(
+               "Stelle|Sovrana|Cateno|Sud|civica") ~
+               "Protectives",
+             Vote_2022 %>% str_detect(
+               "Democratico|Europa|Verdi|Unione") ~
+               "Progressives",
+             Vote_2022 %>% str_detect(
+               "Non ho|Scheda") ~"Blank",
+             TRUE ~ Vote_2022),
+    Pol_allocation_2018 =
+           case_when(
+             Vote_2018 %>% str_detect("Stelle|Pirata|civica") ~
+               "Five Stars",
+             Vote_2018 %>% str_detect(c(
+               "Fratelli|Forza|Lega|Noi con|Casa")) ~
+               "Right",
+             Vote_2018 %>% str_detect(c(
+               "Democratico|Uguali|Verdi|Potere|Europa")) ~
+               "Left",
+             Vote_2018 %>% str_detect("Non |Scheda") ~ "Blank",
+             TRUE ~ Vote_2018)
+  ) -> db_risposte
+```
+
+```{r}
+db_risposte %>%
+  group_by(Siciliani,
+           Pol_allocation_2022) %>%
+  summarise(
+    median_age = median(Age),
+    n = n(),
+    ) %>%
+  group_by(
+    Siciliani
+  ) %>%
+  mutate(
+    f = (n/sum(n)) %>% round(2),
+  ) %>%
+  arrange(Pol_allocation_2022)
+```
+
+
+
+```{r}
+db_risposte %>%
+  group_by(Territory) %>%
+  summarise(
+    n = n(),
+    f = n/nrow(db_risposte)
+  )
+
+db_risposte %>%
+  group_by(Province) %>%
+  summarise(
+    n = n(),
+    f = n/nrow(db_risposte)
+  ) %>% arrange(-n)
+
+db_risposte %>%
+  group_by(Age) %>%
+  count()
+
+db_risposte %>%
+  ggplot(aes(Age)) +
+  geom_density()
+
+db_risposte %>%
+  group_by(Gender) %>%
+  summarise(median(Age))
+
+
+```
+
+
+```{r}
+
+db_risposte %>%
+  filter(Territory == "Toscana") %>%
+  group_by(Province) %>%
+  count() %>% arrange(-n)
+
+db_risposte %>%
+  group_by(Job) %>%
+  count()
+
+db_risposte %>%
+  group_by(Vote_2022) %>%
+  count() %>% arrange(-n)
+
+```
+
+
+
+```{r}
+db_risposte %>%
+  group_by(Pol_allocation_2018,
+           Pol_allocation_2022
+           ) %>%
+  summarise(
+    n = n(),
+    med_age = median(Age %>% as.numeric())) %>%
+  group_by(Pol_allocation_2018) %>%
+  mutate(f_2018 = (n/sum(n)) %>% round(2)) %>%
+  group_by(Pol_allocation_2022) %>%
+  mutate(f_2022 = (n/sum(n)) %>% round(2)) %>%
+  mutate(
+    Pol_allocation_2018 = factor(Pol_allocation_2018,
+                                 c("Right",
+                                   "Five Stars",
+                                   "Left",
+                                   "Blank")),
+    Pol_allocation_2022 = factor(Pol_allocation_2022,
+                                 c("Conservatives",
+                                   "Libertarians",
+                                   "Protectives",
+                                   "Progressives",
+                                   "Blank"))
+    ) -> db_flow
+```
+
+```{r}
+db_flow %>%
+  ggplot(aes(
+    y = n,
+    axis1 = Pol_allocation_2018,
+    axis2 = Pol_allocation_2022
+    )) +
+  geom_alluvium(
+    fill = aes(Pol_allocation_2018),
+    width = 1/12) +
+   geom_stratum(
+     width = 1/12, fill = "black", color = "grey")
+```
+
+
