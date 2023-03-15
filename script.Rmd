@@ -1,6 +1,6 @@
 ---
 title: "import"
-output: html_notebook
+output:
 ---
 
 
@@ -29,12 +29,6 @@ Elenco_comuni_italiani <- read_excel("Elenco-comuni-italiani.xls",
          Sigla = `Sigla automobilistica`
          )
 ```
-
-```{r}
-"hello how
-are you" %>% word(1)
-```
-
 
 
 ```{r}
