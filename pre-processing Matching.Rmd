@@ -1,0 +1,182 @@
+---
+title: "Esempio Matching"
+output:
+---
+
+
+```{r setup}
+pacman::p_load(tidyverse,
+               tidygeocoder,
+               broom,
+               MatchIt)
+```
+
+Pre-processing e pulizia
+
+```{r}
+db_risposte %>%
+  filter(!Province %>% is.na()) %>%
+  select(-`Informazioni cronologiche`,
+         - `Quali di queste tematiche politiche ti hanno spinto a scegliere per chi votare (o astenerti)?
+Puoi selezionare più di una casella.`) %>%
+  rename_with(.col = starts_with("Qual è la Tua opinione sui seguenti"),
+  ~ str_replace(.x,"^[^\\[]+\\[", "Opinion [")) %>%
+  rename_with(.col = starts_with("Chi è privilegiato"),
+  ~ str_replace(.x,"^[^\\[]+\\[", "Privilege [")) %>%
+  rename_with(.col = starts_with("Cosa pensi dell'"),
+  ~ str_replace(.x,"^[^\\[]+\\[", "Xenophilia [")) %>%
+    rename_with(.col = contains("di destra"),
+              ~ str_replace(.x,"Chi mostra opinioni di destra",
+                            "Conservatives")) %>%
+  rename_with(.col = contains("di sinistra"),
+              ~ str_replace(.x,"Chi mostra opinioni di sinistra",
+                            "Progressives")) %>%
+  rename_with(.col = contains("mondo industriale"),
+              ~ str_replace(.x,"Chi fa gli interessi del mondo industriale",
+                            "Corporations")) %>%
+  rename_with(.col = contains("gruppi farmaceutici"),
+              ~ str_replace(.x,"Chi fa gli interessi dei grandi gruppi farmaceutici",
+                            "Big Pharma")) %>%
+    rename_with(.col = contains("gruppi bancari"),
+              ~ str_replace(.x,"Chi fa gli interessi dei grandi gruppi bancari e finanziari",
+                            "Finance")) -> db_risposte_clean
+
+db_risposte_clean %>%
+  rename(
+    Opinion_Flat_Tax = `Cosa ne pensi della Flat Tax?`,
+    Opinion_Basic_Income = `Cosa ne pensi del Reddito di Cittadinanza?`,
+    Opinion_Abortion = `Cosa ne pensi della attuale Legge sull'aborto in Italia?`,
+    Opinion_Green_Pass = `Cosa ne pensi della gestione pandemica in Italia?`,
+    Opinion_Russia = `Qual è la Tua opinione sul conflitto tra Russia ed Ucraina?`,
+    Opinion_Green_Economy = `L'ambientalismo finora è stato un freno alla crescita economica dell'Italia?`,
+    Opinion_Zan_Law = `Cosa ne pensi del Disegno di Legge Zan a favore della tutela e dell'integrazione delle persone con un diverso orientamento sessuale?`
+  ) %>%
+  select(-Province,-Sigla,-Siciliani,
+         -Territory,
+         -Macro_Territory,
+         -Pol_allocation_2018,
+         -Pol_allocation_2022) %>%
+  mutate(across(contains("Opinion"),str_remove_all,"[^0-9]")) %>%
+  mutate(across(contains("Opinion"),as.integer)) %>%
+  mutate(across(contains("Xenophilia"),str_remove_all,"[^0-9]")) %>%
+  mutate(across(contains("Xenophilia"),as.integer)) %>%
+  mutate(across(contains("Titolo di"),str_remove_all,"[^0-9]")) %>%
+  mutate(across(contains("Titolo di"),as.integer)) %>%
+  rename(Education = `Titolo di Studio`) -> db_risposte_clean
+
+db_risposte_clean %>%
+  rename(
+    Xenophilia_blacks = `Xenophilia [Dall'Africa Subsahariana?]`,
+    Xenophilia_arabs = `Xenophilia [Dal Medio Oriente o Nord Africa?]`,
+    Xenophilia_asians_indians = `Xenophilia [Dai paesi asiatici come Cina, India, Bangladesh o Filippine?]`,
+    Xenophilia_southamer = `Xenophilia [Dal Sud America?]`,
+    Xenophilia_esteuro = `Xenophilia [Dall'Est Europa?]`,
+    Xenophilia_men_foreigner = `Xenophilia [Di uomini stranieri?]`,
+    Xenophilia_women_foreigner = `Xenophilia [Di donne straniere?]`
+  ) %>%
+  mutate(across(contains("Privilege"), 
+                list(
+                  self = ~ as.integer(str_detect(., "Per me")) %>% coalesce(0),
+                  friends = ~ as.integer(str_detect(., "Per i miei amici")) %>% coalesce(0),
+                  society = ~ as.integer(str_detect(., "Per gli altri")) %>% coalesce(0)
+                ),
+                .names = "{.fn}_{.col}"
+               )) %>%
+  select(-starts_with("Privilege")) -> db_risposte_clean
+
+db_risposte_clean %>%
+  geocode(city = Location) -> db_risposte_clean
+
+```
+
+```{r}
+db_risposte_clean %>%
+  ggplot(aes(x=long,
+             y=lat)) +
+  geom_point()
+
+db_risposte_clean %>%
+  filter(long > min(long),
+         lat < max(lat)) %>%
+  ggplot(aes(x=long,
+             y=lat)) +
+  geom_point()
+```
+
+SPAZIO PER LE IDEE
+
+```{r}
+#Spazio vuoto per idee esplorative
+```
+
+Introduzione al matching
+
+```{r}
+
+db_risposte_clean %>%
+  lm(Xenophilia_men_foreigner ~ Gender,
+     data = .) %>% tidy() %>%
+  janitor::adorn_rounding(2)
+
+db_risposte_clean %>%
+  lm(Xenophilia_men_foreigner ~ 0 + Gender,
+     data = .) %>% tidy() %>%
+  janitor::adorn_rounding(2)
+
+db_risposte_clean %>%
+  lm(Xenophilia_women_foreigner ~  Gender,
+     data = .) %>% tidy() %>%
+  janitor::adorn_rounding(2)
+
+db_risposte_clean %>%
+  lm(Xenophilia_women_foreigner ~ 0 + Gender,
+     data = .) %>% tidy() %>%
+  janitor::adorn_rounding(2)
+
+db_risposte_clean %>%
+  filter(long > min(long),
+         lat < max(lat)) %>% View()
+  
+```
+
+Matching
+
+```{r}
+db_risposte_clean %>%
+  filter(long > min(long),
+         lat < max(lat)) %>%
+  mutate(Gender =
+           case_match(
+             Gender,
+             "F - Donna" ~ 0,
+             "M - Uomo" ~ 1
+           )) %>%
+  matchit(Gender ~ . - Xenophilia_women_foreigner,
+          method = "nearest",
+          distance = "mahalanobis",
+          data = .) -> matched_model
+
+matched_model %>%
+  match.data() -> matched_db
+  
+
+db_risposte_clean %>%
+  lm(Xenophilia_women_foreigner ~  Gender,
+     data = .) %>% tidy() %>%
+  janitor::adorn_rounding(2)
+
+matched_db %>%
+  lm(Xenophilia_women_foreigner ~  Gender,
+     data = .) %>% tidy() %>%
+  janitor::adorn_rounding(2)
+
+```
+
+---
+
+Paper di Alessandro Strumia (MIT Quantitative Studies: "https://direct.mit.edu/qss/article/2/1/225/99129/Gender-issues-in-fundamental-physics-A")
+
+Paper di Huang, Gates, Sinatra, Barabasi (PNAS:
+https://www.pnas.org/doi/epdf/10.1073/pnas.1914221117
+)
+
